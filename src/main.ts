@@ -21,6 +21,7 @@ import {
     fromEvent,
     interval,
     map,
+    merge,
     scan,
     switchMap,
     take,
@@ -74,8 +75,27 @@ const initialState: State = {
  * @param s Current state
  * @returns Updated state
  */
-const tick = (s: State) => s;
+const tick = (s: State) => {
+    const newVel = s.vel + Constants.GRAVITY;
+    const newY = s.posY + newVel;
 
+    return {
+        ...s,
+        posY: newY,
+        vel: newVel,
+    };
+};
+
+const flap = (s: State) => {
+    const newVel = Constants.FLAP;
+    const newY = s.posY + newVel;
+
+    return {
+        ...s,
+        posY: newY,
+        vel: newVel,
+    };
+};
 // Rendering (side effects)
 
 /**
@@ -191,10 +211,13 @@ export const state$ = (csvContents: string): Observable<State> => {
     const fromKey = (keyCode: Key) =>
         key$.pipe(filter(({ code }) => code === keyCode));
 
+    const flap$ = fromKey("Space").pipe(map(() => flap));
     /** Determines the rate of time steps */
-    const tick$ = interval(Constants.TICK_RATE_MS);
+    const tick$ = interval(Constants.TICK_RATE_MS).pipe(map(() => tick));
 
-    return tick$.pipe(scan((s: State) => ({ gameEnd: false }), initialState));
+    return merge(flap$, tick$).pipe(
+        scan((s: State, reducerFn) => reducerFn(s), initialState),
+    );
 };
 
 // The following simply runs your main function on window load.  Make sure to leave it in place.
