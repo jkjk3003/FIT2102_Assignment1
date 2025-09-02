@@ -44,7 +44,7 @@ const Constants = {
     GRAVITY: 1,
     FLAP: -8,
     PIPE_WIDTH: 50,
-    TICK_RATE_MS: 500, // Might need to change this!
+    TICK_RATE_MS: 20,
 } as const;
 
 // User input
@@ -167,11 +167,17 @@ const render = (): ((s: State) => void) => {
      * @param s Current state
      */
     return (s: State) => {
+        svg.innerHTML = "";
+
+        livesText.textContent = `${s.lives}`;
+        scoreText.textContent = `${s.score}`;
         // Add birb to the main grid canvas
+        gameOver.setAttribute("visibility", s.gameEnd ? "visible" : "hidden");
+
         const birdImg = createSvgElement(svg.namespaceURI, "image", {
             href: "assets/birb.png",
             x: `${Viewport.CANVAS_WIDTH * 0.3 - Birb.WIDTH / 2}`,
-            y: `${Viewport.CANVAS_HEIGHT / 2 - Birb.HEIGHT / 2}`,
+            y: `${s.posY - Birb.HEIGHT / 2}`,
             width: `${Birb.WIDTH}`,
             height: `${Birb.HEIGHT}`,
         });
