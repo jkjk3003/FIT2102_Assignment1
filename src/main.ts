@@ -40,6 +40,8 @@ const Birb = {
 } as const;
 
 const Constants = {
+    GRAVITY: 1,
+    FLAP: -8,
     PIPE_WIDTH: 50,
     TICK_RATE_MS: 500, // Might need to change this!
 } as const;
@@ -51,10 +53,18 @@ type Key = "Space";
 // State processing
 
 type State = Readonly<{
+    posY: number;
+    vel: number;
+    lives: number;
+    score: number;
     gameEnd: boolean;
 }>;
 
 const initialState: State = {
+    posY: Viewport.CANVAS_HEIGHT / 2,
+    vel: 0,
+    lives: 3,
+    score: 0,
     gameEnd: false,
 };
 
