@@ -18,13 +18,16 @@ import {
     Observable,
     catchError,
     filter,
+    from,
     fromEvent,
     interval,
     map,
     merge,
+    mergeMap,
     scan,
     switchMap,
     take,
+    timer,
 } from "rxjs";
 import { fromFetch } from "rxjs/fetch";
 
@@ -43,6 +46,7 @@ const Birb = {
 const Constants = {
     GRAVITY: 1,
     FLAP: -8,
+    PIPE_SPEED: 5,
     PIPE_WIDTH: 50,
     TICK_RATE_MS: 20,
 } as const;
@@ -50,8 +54,17 @@ const Constants = {
 // User input
 
 type Key = "Space";
-
+type IncomingPipe = Readonly<{
+    gapY: number;
+    gapHeight: number;
+    time: number;
+}>;
 // State processing
+type Pipe = Readonly<{
+    x: number;
+    gapY: number;
+    gapHeight: number;
+}>;
 
 type State = Readonly<{
     posY: number;
@@ -59,6 +72,7 @@ type State = Readonly<{
     lives: number;
     score: number;
     gameEnd: boolean;
+    pipes: ReadonlyArray<Pipe>;
 }>;
 
 const initialState: State = {
@@ -67,6 +81,7 @@ const initialState: State = {
     lives: 3,
     score: 0,
     gameEnd: false,
+    pipes: [],
 };
 
 /**
@@ -79,10 +94,15 @@ const tick = (s: State) => {
     const newVel = s.vel + Constants.GRAVITY;
     const newY = s.posY + newVel;
 
+    const movePipes = s.pipes
+        .map(p => ({ ...p, x: p.x - Constants.PIPE_SPEED }))
+        .filter(p => p.x + Constants.PIPE_WIDTH > 0);
+
     return {
         ...s,
         posY: newY,
         vel: newVel,
+        pipes: movePipes,
     };
 };
 
@@ -183,32 +203,60 @@ const render = (): ((s: State) => void) => {
         });
         svg.appendChild(birdImg);
 
-        // Draw a static pipe as a demonstration
-        const pipeGapY = 200; // vertical center of the gap
-        const pipeGapHeight = 100;
+        s.pipes.forEach(pipe => {
+            // Top pipe
+            const pipeTop = createSvgElement(svg.namespaceURI, "rect", {
+                x: `${pipe.x}`,
+                y: "0",
+                width: `${Constants.PIPE_WIDTH}`,
+                height: `${pipe.gapY - pipe.gapHeight / 2}`,
+                fill: "green",
+            });
 
-        // Top pipe
-        const pipeTop = createSvgElement(svg.namespaceURI, "rect", {
-            x: "150",
-            y: "0",
-            width: `${Constants.PIPE_WIDTH}`,
-            height: `${pipeGapY - pipeGapHeight / 2}`,
-            fill: "green",
+            // Bottom pipe
+            const pipeBottom = createSvgElement(svg.namespaceURI, "rect", {
+                x: `${pipe.x}`,
+                y: `${pipe.gapY + pipe.gapHeight / 2}`,
+                width: `${Constants.PIPE_WIDTH}`,
+                height: `${Viewport.CANVAS_HEIGHT - (pipe.gapY + pipe.gapHeight / 2)}`,
+                fill: "green",
+            });
+
+            svg.appendChild(pipeTop);
+            svg.appendChild(pipeBottom);
         });
-
-        // Bottom pipe
-        const pipeBottom = createSvgElement(svg.namespaceURI, "rect", {
-            x: "150",
-            y: `${pipeGapY + pipeGapHeight / 2}`,
-            width: `${Constants.PIPE_WIDTH}`,
-            height: `${Viewport.CANVAS_HEIGHT - (pipeGapY + pipeGapHeight / 2)}`,
-            fill: "green",
-        });
-
-        svg.appendChild(pipeTop);
-        svg.appendChild(pipeBottom);
     };
 };
+
+function parseCsv(csv: string): IncomingPipe[] {
+    return csv
+        .trim()
+        .split("\n")
+        .slice(1)
+        .map(line => {
+            const [gapY, gapHeight, time] = line.split(",").map(Number);
+            return {
+                gapY: gapY * Viewport.CANVAS_HEIGHT,
+                gapHeight: gapHeight * Viewport.CANVAS_HEIGHT,
+                time: time * 1000, // convert seconds to ms
+            };
+        });
+}
+
+function pipeStream(csvContents: string) {
+    const scheduled = parseCsv(csvContents);
+    return from(scheduled).pipe(
+        mergeMap(pipe =>
+            timer(pipe.time).pipe(
+                map(() => ({
+                    x: Viewport.CANVAS_WIDTH,
+                    gapY: pipe.gapY,
+                    gapHeight: pipe.gapHeight,
+                })),
+            ),
+        ),
+    );
+}
 
 export const state$ = (csvContents: string): Observable<State> => {
     /** User input */
@@ -218,10 +266,14 @@ export const state$ = (csvContents: string): Observable<State> => {
         key$.pipe(filter(({ code }) => code === keyCode));
 
     const flap$ = fromKey("Space").pipe(map(() => flap));
+
+    const pipe$ = pipeStream(csvContents).pipe(
+        map(pipe => (s: State) => ({ ...s, pipes: [...s.pipes, pipe] })),
+    );
     /** Determines the rate of time steps */
     const tick$ = interval(Constants.TICK_RATE_MS).pipe(map(() => tick));
 
-    return merge(flap$, tick$).pipe(
+    return merge(flap$, tick$, pipe$).pipe(
         scan((s: State, reducerFn) => reducerFn(s), initialState),
     );
 };
