@@ -12,6 +12,7 @@
  * Document your code!
  */
 
+import { parse } from "path";
 import "./style.css";
 
 import {
@@ -75,6 +76,7 @@ type State = Readonly<{
     score: number;
     gameEnd: boolean;
     pipes: ReadonlyArray<Pipe>;
+    pipesRemaining: number;
 }>;
 
 const initialState: State = {
@@ -84,6 +86,7 @@ const initialState: State = {
     score: 0,
     gameEnd: false,
     pipes: [],
+    pipesRemaining: 0,
 };
 
 /**
@@ -126,6 +129,10 @@ const tick = (s: State) => {
         score: s.score + points,
         pipes: scoredPipes,
     };
+
+    if (newState.pipesRemaining === 0 && newState.pipes.length === 0) {
+        return { ...newState, gameEnd: true };
+    }
 
     const bounce = handleCollisions(newState);
     if (bounce != null) {
@@ -325,7 +332,7 @@ function handleCollisions(s: State): number | null {
 
 export const state$ = (csvContents: string): Observable<State> => {
     /** User input */
-
+    const pipes = parseCsv(csvContents);
     const key$ = fromEvent<KeyboardEvent>(document, "keypress");
     const fromKey = (keyCode: Key) =>
         key$.pipe(filter(({ code }) => code === keyCode));
@@ -336,6 +343,7 @@ export const state$ = (csvContents: string): Observable<State> => {
         map(pipe => (s: State) => ({
             ...s,
             pipes: [...s.pipes, pipe],
+            pipesRemaining: s.pipesRemaining - 1,
         })),
     );
 
@@ -347,10 +355,10 @@ export const state$ = (csvContents: string): Observable<State> => {
     return restart$.pipe(
         switchMap(() => {
             return merge(flap$, tick$, pipe$).pipe(
-                scan(
-                    (s: State, reducerFn) => (s.gameEnd ? s : reducerFn(s)),
-                    initialState,
-                ),
+                scan((s: State, reducerFn) => (s.gameEnd ? s : reducerFn(s)), {
+                    ...initialState,
+                    pipesRemaining: pipes.length,
+                }),
             );
         }),
     );
