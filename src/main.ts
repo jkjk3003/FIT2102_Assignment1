@@ -25,6 +25,7 @@ import {
     merge,
     mergeMap,
     scan,
+    startWith,
     switchMap,
     take,
     timer,
@@ -53,7 +54,7 @@ const Constants = {
 
 // User input
 
-type Key = "Space";
+type Key = "Space" | "KeyR";
 type IncomingPipe = Readonly<{
     gapY: number;
     gapHeight: number;
@@ -64,6 +65,7 @@ type Pipe = Readonly<{
     x: number;
     gapY: number;
     gapHeight: number;
+    scored: boolean;
 }>;
 
 type State = Readonly<{
@@ -94,15 +96,35 @@ const tick = (s: State) => {
     const newVel = s.vel + Constants.GRAVITY;
     const newY = s.posY + newVel;
 
+    const birdX = Viewport.CANVAS_WIDTH * 0.3;
+
     const movePipes = s.pipes
         .map(p => ({ ...p, x: p.x - Constants.PIPE_SPEED }))
         .filter(p => p.x + Constants.PIPE_WIDTH > 0);
+
+    const { scoredPipes, points } = movePipes.reduce(
+        (acc, pipe) =>
+            birdX > pipe.x + Constants.PIPE_WIDTH && !pipe.scored
+                ? {
+                      scoredPipes: [
+                          ...acc.scoredPipes,
+                          { ...pipe, scored: true },
+                      ],
+                      points: acc.points + 1,
+                  }
+                : {
+                      scoredPipes: [...acc.scoredPipes, pipe],
+                      points: acc.points,
+                  },
+        { scoredPipes: [] as Pipe[], points: 0 },
+    );
 
     const newState = {
         ...s,
         posY: newY,
         vel: newVel,
-        pipes: movePipes,
+        score: s.score + points,
+        pipes: scoredPipes,
     };
 
     const bounce = handleCollisions(newState);
@@ -271,6 +293,7 @@ function pipeStream(csvContents: string): Observable<Pipe> {
                     x: Viewport.CANVAS_WIDTH,
                     gapY: pipe.gapY,
                     gapHeight: pipe.gapHeight,
+                    scored: false,
                 })),
             ),
         ),
@@ -310,16 +333,26 @@ export const state$ = (csvContents: string): Observable<State> => {
     const flap$ = fromKey("Space").pipe(map(() => flap));
 
     const pipe$ = pipeStream(csvContents).pipe(
-        map(pipe => (s: State) => ({ ...s, pipes: [...s.pipes, pipe] })),
+        map(pipe => (s: State) => ({
+            ...s,
+            pipes: [...s.pipes, pipe],
+        })),
     );
+
+    const restart$ = fromKey("KeyR").pipe(startWith(null));
+
     /** Determines the rate of time steps */
     const tick$ = interval(Constants.TICK_RATE_MS).pipe(map(() => tick));
 
-    return merge(flap$, tick$, pipe$).pipe(
-        scan(
-            (s: State, reducerFn) => (s.gameEnd ? s : reducerFn(s)),
-            initialState,
-        ),
+    return restart$.pipe(
+        switchMap(() => {
+            return merge(flap$, tick$, pipe$).pipe(
+                scan(
+                    (s: State, reducerFn) => (s.gameEnd ? s : reducerFn(s)),
+                    initialState,
+                ),
+            );
+        }),
     );
 };
 
