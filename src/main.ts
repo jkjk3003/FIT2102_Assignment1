@@ -12,7 +12,6 @@
  * Document your code!
  */
 
-import { parse } from "path";
 import "./style.css";
 
 import {
@@ -61,7 +60,7 @@ type IncomingPipe = Readonly<{
     gapHeight: number;
     time: number;
 }>;
-// State processing
+
 type Pipe = Readonly<{
     x: number;
     gapY: number;
@@ -69,6 +68,7 @@ type Pipe = Readonly<{
     scored: boolean;
 }>;
 
+// State processing
 type State = Readonly<{
     posY: number;
     vel: number;
@@ -77,6 +77,8 @@ type State = Readonly<{
     gameEnd: boolean;
     pipes: ReadonlyArray<Pipe>;
     pipesRemaining: number;
+    currentRun: ReadonlyArray<State>;
+    previousRuns: ReadonlyArray<ReadonlyArray<State>>;
 }>;
 
 const initialState: State = {
@@ -87,6 +89,8 @@ const initialState: State = {
     gameEnd: false,
     pipes: [],
     pipesRemaining: 0,
+    currentRun: [],
+    previousRuns: [],
 };
 
 /**
@@ -96,6 +100,7 @@ const initialState: State = {
  * @returns Updated state
  */
 const tick = (s: State) => {
+    if (s.gameEnd) return s;
     const newVel = s.vel + Constants.GRAVITY;
     const newY = s.posY + newVel;
 
@@ -130,11 +135,21 @@ const tick = (s: State) => {
         pipes: scoredPipes,
     };
 
-    if (newState.pipesRemaining === 0 && newState.pipes.length === 0) {
-        return { ...newState, gameEnd: true };
+    const current = {
+        ...newState,
+        currentRun: [...s.currentRun, newState],
+    };
+
+    if (current.pipesRemaining === 0 && current.pipes.length === 0) {
+        return {
+            ...current,
+            gameEnd: true,
+            previousRuns: [...s.previousRuns, current.currentRun],
+            currentRun: [],
+        };
     }
 
-    const bounce = handleCollisions(newState);
+    const bounce = handleCollisions(current);
     if (bounce != null) {
         const newLives = s.lives - 1;
 
@@ -143,20 +158,26 @@ const tick = (s: State) => {
             vel: bounce,
             lives: newLives,
             gameEnd: newLives <= 0,
+            previousRuns:
+                newLives <= 0
+                    ? [...s.previousRuns, current.currentRun]
+                    : s.previousRuns,
+            currentRun: newLives <= 0 ? [] : current.currentRun,
         };
     }
 
-    return newState;
+    return current;
 };
 
-const flap = (s: State) => {
-    const newVel = Constants.FLAP;
-    const newY = s.posY + newVel;
-
-    return {
+const flap = (s: State): State => {
+    if (s.gameEnd) return s;
+    const newState = {
         ...s,
-        posY: newY,
-        vel: newVel,
+        vel: Constants.FLAP,
+    };
+    return {
+        ...newState,
+        currentRun: [...s.currentRun, newState],
     };
 };
 // Rendering (side effects)
@@ -210,12 +231,10 @@ const createSvgElement = (
 const render = (): ((s: State) => void) => {
     // Canvas elements
     const gameOver = document.querySelector("#gameOver") as SVGElement;
-    const container = document.querySelector("#main") as HTMLElement;
     const objects = document.querySelector("#gameObjects") as SVGElement;
     // Text fields
     const livesText = document.querySelector("#livesText") as HTMLElement;
     const scoreText = document.querySelector("#scoreText") as HTMLElement;
-
     const svg = document.querySelector("#svgCanvas") as SVGSVGElement;
 
     svg.setAttribute(
@@ -231,7 +250,6 @@ const render = (): ((s: State) => void) => {
      */
     return (s: State) => {
         objects.innerHTML = "";
-
         livesText.textContent = `${s.lives}`;
         scoreText.textContent = `${s.score}`;
         // Add birb to the main grid canvas
@@ -240,6 +258,25 @@ const render = (): ((s: State) => void) => {
             show(gameOver);
         } else {
             hide(gameOver);
+            const frameIndex = s.currentRun.length;
+            s.previousRuns.forEach(run => {
+                if (frameIndex < run.length) {
+                    const ghostState = run[frameIndex];
+                    const ghostImg = createSvgElement(
+                        svg.namespaceURI,
+                        "image",
+                        {
+                            href: "assets/birb.png",
+                            x: `${Viewport.CANVAS_WIDTH * 0.3 - Birb.WIDTH / 2}`,
+                            y: `${ghostState.posY - Birb.HEIGHT / 2}`,
+                            width: `${Birb.WIDTH}`,
+                            height: `${Birb.HEIGHT}`,
+                            opacity: "0.2",
+                        },
+                    );
+                    objects.appendChild(ghostImg);
+                }
+            });
         }
 
         const birdImg = createSvgElement(svg.namespaceURI, "image", {
@@ -310,14 +347,16 @@ function pipeStream(csvContents: string): Observable<Pipe> {
 function handleCollisions(s: State): number | null {
     const birdX = Viewport.CANVAS_WIDTH * 0.3;
     const posY = s.posY;
+    const bounceUp = -(Math.random() * 5 + 12);
+    const bounceDown = Math.random() * 3 + 5;
 
     if (posY <= 0) {
-        return Math.random() * 5 + 5; // bounce down
+        return bounceDown; // bounce down
     }
     if (posY >= Viewport.CANVAS_HEIGHT) {
-        return -(Math.random() * 5 + 5); // bounce up
+        return bounceUp; // bounce up
     }
-    //The small code block below was generated by AI, which was used to handle the collision of the bird and the pipes.
+
     const pipe = s.pipes.find(pipe => {
         const withinX = birdX > pipe.x && birdX < pipe.x + Constants.PIPE_WIDTH;
         const hitTop = posY < pipe.gapY - pipe.gapHeight / 2;
@@ -327,7 +366,7 @@ function handleCollisions(s: State): number | null {
 
     if (!pipe) return null;
 
-    return posY < pipe.gapY ? Math.random() * 5 + 5 : -(Math.random() * 5 + 5);
+    return posY < pipe.gapY ? bounceDown : bounceUp;
 }
 
 export const state$ = (csvContents: string): Observable<State> => {
@@ -339,27 +378,44 @@ export const state$ = (csvContents: string): Observable<State> => {
 
     const flap$ = fromKey("Space").pipe(map(() => flap));
 
-    const pipe$ = pipeStream(csvContents).pipe(
-        map(pipe => (s: State) => ({
-            ...s,
-            pipes: [...s.pipes, pipe],
-            pipesRemaining: s.pipesRemaining - 1,
-        })),
-    );
-
     const restart$ = fromKey("KeyR").pipe(startWith(null));
 
+    const pipe$ = restart$.pipe(
+        switchMap(() =>
+            pipeStream(csvContents).pipe(
+                map(
+                    pipe => (s: State) =>
+                        s.gameEnd
+                            ? s
+                            : {
+                                  ...s,
+                                  pipes: [...s.pipes, pipe],
+                                  pipesRemaining: s.pipesRemaining - 1,
+                              },
+                ),
+            ),
+        ),
+    );
+
+    const restartReducer$ = restart$.pipe(
+        map(
+            () =>
+                (s: State): State => ({
+                    ...initialState,
+                    // preserve ghosts across restarts
+                    previousRuns: s.previousRuns,
+                    // reset the schedule counter
+                    pipesRemaining: pipes.length,
+                }),
+        ),
+    );
     /** Determines the rate of time steps */
     const tick$ = interval(Constants.TICK_RATE_MS).pipe(map(() => tick));
 
-    return restart$.pipe(
-        switchMap(() => {
-            return merge(flap$, tick$, pipe$).pipe(
-                scan((s: State, reducerFn) => (s.gameEnd ? s : reducerFn(s)), {
-                    ...initialState,
-                    pipesRemaining: pipes.length,
-                }),
-            );
+    return merge(flap$, tick$, pipe$, restartReducer$).pipe(
+        scan((s: State, reducerFn) => reducerFn(s), {
+            ...initialState,
+            pipesRemaining: pipes.length,
         }),
     );
 };
