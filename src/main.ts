@@ -154,7 +154,7 @@ const tick = (s: State) => {
         const newLives = s.lives - 1;
 
         return {
-            ...newState,
+            ...current,
             vel: bounce,
             lives: newLives,
             gameEnd: newLives <= 0,
@@ -452,3 +452,13 @@ if (typeof window !== "undefined") {
         ),
     ).subscribe(render());
 }
+
+export {
+    tick,
+    flap,
+    parseCsv,
+    handleCollisions,
+    initialState,
+    Constants,
+    Viewport,
+};
